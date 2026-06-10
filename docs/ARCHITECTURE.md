@@ -151,12 +151,15 @@ fp32** models at dim=128/depth=4:
 | mla | 0.69 | 2.78 | 0.209 |
 | **silero-v6** | 0.46 | 2.19 | **0.009** |
 
-**First trained result (pipeline validation).** A 6-epoch smoke run of `mamba2`
-(0.89M params) on the on-the-fly noisy multi-speaker mix reaches **val/primary_f1
-≈ 0.91** (train loss 0.58→0.30, val/acc 0.80→0.85) — i.e. the 0.89M-param stateful
-model isolates the foreground speaker at ~91% F1 with interferers and noise present.
-This is a short validation run, not a tuned model; a longer clean→noisy curriculum is
-expected to improve calibration on out-of-distribution clean wideband audio.
+**Trained result (the bundled `mamba2` pretrained model).** A 20-epoch run of `mamba2`
+(0.89M params) on the on-the-fly noisy multi-speaker mix reaches **val/primary_f1 0.955**
+(precision 0.93, recall 0.98, frame acc 0.93). Critically for the project's goal, the
+background-voice false-fire rate — `secondary_false_fire`, the fraction of interferer-only
+frames it wrongly flags as foreground — falls **0.55 → 0.19** over training, i.e. the
+stateful model learns to ignore background voices. These weights ship in the wheel
+(`VADModel.from_pretrained("mamba2")`). Compression: fp32 3.58 MB → **torch-int8 1.03 MB**
+(under Silero's ~2 MB) → onnx-fp32 2.66 MB. Numbers are on the synthetic validation
+distribution; the AVA-Speech / VoxConverse eval harness (roadmap) is the next measure.
 
 Reading the latency honestly: neovad already matches Silero on **size** and is comfortably
 real-time (RTF ≤ 0.21 = ≥5× faster than real time), but it is **not yet beating Silero on
