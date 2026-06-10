@@ -107,7 +107,7 @@ class GQAMixer(AttentionMixer):
         empty = torch.zeros(batch, self.n_kv, 0, self.head_dim, device=device, dtype=dtype)
         return GQAState(k=empty, v=empty.clone(), pos=0)
 
-    def step(self, x: Tensor, state: GQAState) -> Tensor:
+    def step_frame(self, x: Tensor, state: GQAState) -> Tensor:
         pos = torch.tensor([state.pos], device=x.device)
         q, k, v = self.project(x)
         q = self.rope.apply_rotary(q, pos)
@@ -202,7 +202,7 @@ class MLAMixer(AttentionMixer):
             pos=0,
         )
 
-    def step(self, x: Tensor, state: MLAState) -> Tensor:
+    def step_frame(self, x: Tensor, state: MLAState) -> Tensor:
         pos = torch.tensor([state.pos], device=x.device)
         q_nope, q_rope = self.split_query(x, pos)
         c_kv = self.w_dkv(x)
@@ -297,7 +297,7 @@ class DiffAttnMixer(AttentionMixer):
         v = torch.zeros(batch, self.n_heads, 0, 2 * self.head_dim, device=device, dtype=dtype)
         return DiffAttnState(k=k, v=v, pos=0)
 
-    def step(self, x: Tensor, state: DiffAttnState) -> Tensor:
+    def step_frame(self, x: Tensor, state: DiffAttnState) -> Tensor:
         pos = torch.tensor([state.pos], device=x.device)
         q, k, v = self.project(x, pos)
         state.k = torch.cat([state.k, k], dim=2)[:, :, -self.window :]

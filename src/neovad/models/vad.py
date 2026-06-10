@@ -61,17 +61,31 @@ class VADModel(nn.Module):
             return []
         return sorted(f.name[:-3] for f in weights.iterdir() if f.name.endswith(".pt"))
 
+    HF_REPO = "NeovisionTech/neovad"
+
     @classmethod
     def from_pretrained(cls, name: str = "mamba2", map_location: str = "cpu") -> Self:
-        """Load weights bundled with the installed package — `pip install` then
-        `VADModel.from_pretrained()` gives a ready-to-use model, no download."""
+        """Load named pretrained weights: first from the wheel (bundled, offline), then
+        from the HuggingFace Hub (``HF_REPO``) for checkpoints published after this
+        package version shipped."""
         path = resources.files("neovad").joinpath("weights", f"{name}.pt")
-        if not path.is_file():
+        if path.is_file():
+            with resources.as_file(path) as real:
+                return cls.load(real, map_location=map_location)
+        try:  # optional third-party fallback — hub download for non-bundled names
+            from huggingface_hub import hf_hub_download
+        except ImportError:
             raise FileNotFoundError(
-                f"no bundled weights {name!r}; available: {cls.pretrained_names()}"
-            )
-        with resources.as_file(path) as real:
-            return cls.load(real, map_location=map_location)
+                f"no bundled weights {name!r} (available: {cls.pretrained_names()}); "
+                f"install huggingface_hub to fetch from {cls.HF_REPO}"
+            ) from None
+        try:
+            return cls.load(hf_hub_download(cls.HF_REPO, f"{name}.pt"), map_location=map_location)
+        except Exception as err:  # hub/network errors -> one clear not-found contract
+            raise FileNotFoundError(
+                f"weights {name!r} neither bundled (available: {cls.pretrained_names()}) "
+                f"nor fetchable from {cls.HF_REPO}: {err}"
+            ) from err
 
     @property
     def param_count(self) -> int:
@@ -95,14 +109,11 @@ class VADModel(nn.Module):
         )
 
     def step(self, chunk: Tensor, state: VADState) -> Tensor:
-        # chunk: [B, n_samples] -> logits [B, n_new_frames, n_classes]
+        # chunk: [B, n_samples] -> logits [B, n_new_frames, n_classes]. Mixers accept
+        # multi-frame steps, so projection/blocks/head run once per chunk, not per frame.
         mels = self.frontend.step(chunk, state.frontend)
         if mels.shape[1] == 0:
             return torch.zeros(
                 chunk.shape[0], 0, self.head.n_classes, device=chunk.device, dtype=chunk.dtype
             )
-        frames = [
-            self.head(self.backbone.step(self.input_proj(mels[:, t : t + 1]), state.layers))
-            for t in range(mels.shape[1])
-        ]
-        return torch.cat(frames, dim=1)
+        return self.head(self.backbone.step(self.input_proj(mels), state.layers))

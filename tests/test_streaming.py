@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from neovad.frontend.mel import FrontendConfig, MelFrontend
@@ -29,16 +30,20 @@ def test_mixer_forward_step_equivalence(backbone):
     assert torch.allclose(full, stepped, atol=1e-4)
 
 
-def test_model_forward_step_equivalence(backbone, make_model):
+@pytest.mark.parametrize("chunk_hops", [1, 3])
+def test_model_forward_step_equivalence(backbone, make_model, chunk_hops):
+    # chunk_hops=1 is the finest streaming cadence; 3 exercises the multi-frame step
+    # path (one step() call advancing several frames) against the same parallel forward.
     torch.manual_seed(0)
     model = make_model(backbone).eval()
     wav = torch.randn(2, 8000)
-    hop = model.cfg.frontend.hop_length
+    chunk = model.cfg.frontend.hop_length * chunk_hops
     with torch.no_grad():
         full = model(wav)
         state = model.init_state(2, wav.device, torch.float32)
         stepped = torch.cat(
-            [model.step(wav[:, i : i + hop], state) for i in range(0, wav.shape[1], hop)], dim=1
+            [model.step(wav[:, i : i + chunk], state) for i in range(0, wav.shape[1], chunk)],
+            dim=1,
         )
     n = min(full.shape[1], stepped.shape[1])
     assert torch.allclose(full[:, :n], stepped[:, :n], atol=1e-3)

@@ -24,9 +24,11 @@ class StreamingMixer(Registry, nn.Module, root=True):
 
     * ``forward`` — the parallel, full-sequence path used for training; must be
       causal so that frame ``t`` only attends to frames ``<= t``.
-    * ``init_state`` + ``step`` — the recurrent, one-frame-at-a-time path used for
-      streaming inference. ``step`` consumes a single frame ``[B, 1, D]`` and the
-      mutable :class:`ModuleState`, returning ``[B, 1, D]``.
+    * ``init_state`` + ``step`` — the recurrent path used for streaming inference.
+      ``step`` consumes one or more new frames ``[B, n, D]`` (n >= 1) plus the mutable
+      :class:`ModuleState` and returns ``[B, n, D]``. Recurrent mixers implement the
+      single-frame ``step_frame`` and inherit the multi-frame loop; mixers whose
+      recurrence natively consumes sequences (GRU) override ``step`` directly.
 
     Equivalence between the two paths (within float tolerance) is a hard contract,
     verified by tests; it is what lets us train in parallel and serve frame-by-frame.
@@ -44,6 +46,13 @@ class StreamingMixer(Registry, nn.Module, root=True):
         raise NotImplementedError
 
     def step(self, x: Tensor, state: ModuleState) -> Tensor:
+        if x.shape[1] == 1:
+            return self.step_frame(x, state)
+        return torch.cat(
+            [self.step_frame(x[:, t : t + 1], state) for t in range(x.shape[1])], dim=1
+        )
+
+    def step_frame(self, x: Tensor, state: ModuleState) -> Tensor:
         raise NotImplementedError
 
 

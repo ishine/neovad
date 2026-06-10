@@ -127,15 +127,22 @@ class Mamba2Mixer(StreamingMixer):
         )
 
     def step(self, x: Tensor, state: Mamba2State) -> Tensor:
+        # Native multi-frame step: projections, short conv, gate-norm and out-proj are
+        # batched over the n incoming frames; only the O(1)-state SSM recurrence loops,
+        # and it is a handful of elementwise ops per frame.
         z, xBC, dt_raw = self.split_projection(x)
         xBC = F.silu(self.conv.step(xBC, state.conv))
-        xi, b, c = self.split_xBC(xBC)
-        xi, b, c = xi[:, 0], b[:, 0], c[:, 0]  # drop time -> [B,H,P], [B,H,N]
-        dt = F.softplus(dt_raw[:, 0] + self.dt_bias)  # [B, H]
-        a = torch.exp(dt * -torch.exp(self.A_log))  # [B, H] discrete decay
-        state.ssm = (
-            state.ssm * a[:, :, None, None] + (dt[:, :, None] * xi)[..., None] * b[:, :, None, :]
-        )
-        y = (state.ssm * c[:, :, None, :]).sum(-1) + self.D[None, :, None] * xi  # [B, H, P]
-        y = rearrange(y, "b h p -> b () (h p)")
+        xi, b, c = self.split_xBC(xBC)  # xi:[B,n,H,P]; b,c:[B,n,H,N]
+        dt = F.softplus(dt_raw + self.dt_bias)  # [B, n, H]
+        a = torch.exp(dt * -torch.exp(self.A_log))  # [B, n, H] discrete decay
+        ssm = state.ssm
+        ys = []
+        for t in range(x.shape[1]):
+            ssm = (
+                ssm * a[:, t][..., None, None]
+                + (dt[:, t][..., None] * xi[:, t])[..., None] * b[:, t][:, :, None, :]
+            )
+            ys.append((ssm * c[:, t][:, :, None, :]).sum(-1) + self.D[None, :, None] * xi[:, t])
+        state.ssm = ssm
+        y = rearrange(torch.stack(ys, dim=1), "b n h p -> b n (h p)")
         return self.out_proj(self.norm(y, z))

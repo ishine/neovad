@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from rich.console import Console
 from rich.table import Table
 
+from neovad.export import ModelExporter
 from neovad.models.vad import VADModel
 
 
@@ -51,22 +52,29 @@ class LatencyBenchmark:
         return perf_counter() - t0
 
     @torch.no_grad()
-    def bench_neovad(self, model: VADModel, name: str = "neovad") -> LatencyResult:
+    def bench_neovad(
+        self, model: VADModel, name: str = "neovad", chunk_hops: int = 1, int8: bool = False
+    ) -> LatencyResult:
+        # chunk_hops: frames consumed per step() call. 1 = finest decision latency
+        # (10 ms); 3 = Silero's ~32 ms cadence, amortizing per-call overhead.
         torch.set_num_threads(self.threads)
-        model = model.eval().to(self.device)
+        runner = model.eval().to(self.device)
+        params = runner.param_count
+        if int8:
+            runner = ModelExporter.quantize_dynamic(runner)
         hop = model.cfg.frontend.hop_length
         sr = model.cfg.frontend.sample_rate
-        n = int(self.seconds * sr / hop)
-        chunk = torch.randn(1, hop, device=self.device)
-        state = model.init_state(1, self.device, torch.float32)
-        dt = self.time_stream(lambda: model.step(chunk, state), n)
+        n = int(self.seconds * sr / (hop * chunk_hops))
+        chunk = torch.randn(1, hop * chunk_hops, device=self.device)
+        state = runner.init_state(1, self.device, torch.float32)
+        dt = self.time_stream(lambda: runner.step(chunk, state), n)
         return LatencyResult(
             name=name,
-            params_m=model.param_count / 1e6,
-            size_mb=self.size_mb(model.state_dict()),
+            params_m=params / 1e6,
+            size_mb=self.size_mb(runner.state_dict()),
             chunk_ms=dt / n * 1000,
-            chunk_audio_ms=hop / sr * 1000,
-            rtf=dt / self.seconds,
+            chunk_audio_ms=hop * chunk_hops / sr * 1000,
+            rtf=dt / (n * hop * chunk_hops / sr),
         )
 
     @torch.no_grad()

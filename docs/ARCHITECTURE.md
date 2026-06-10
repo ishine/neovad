@@ -185,6 +185,37 @@ tiny tensors. So fused-fp32 is the main speed lever, int8 is an optional size wi
 mamba/attention deployed cross-platform, **ONNX fp32** is faithful and portable; ONNX-int8
 is counter-productive at this size.
 
+### Measured (trained mamba2, 1 CPU thread)
+
+* **ONNX validation**: probability parity vs torch on real LibriSpeech audio
+  **1.4e-4**; onnxruntime fp32 offline (2 s windows) **RTF 0.005 — below Silero's
+  0.009** and 1.6× faster than torch eager.
+* **Streaming step** (multi-frame steps batch projections/conv/norm per chunk; only the
+  O(1) SSM recurrence loops per frame): mamba2 RTF 0.20 @10 ms cadence → **0.089
+  @30 ms** (Silero's cadence) → 0.044 @100 ms. gru: 0.046 @30 ms. int8 halves nothing
+  on speed at this scale but cuts size 3.58 → **0.96 MB**.
+* The remaining streaming gap to Silero (0.089 vs 0.009) is per-call Python/dispatch
+  overhead on a tiny graph — the path to close it is exporting the `step` graph itself
+  (encoder/decoder split), not more model changes.
+
+### Publishing to HuggingFace
+
+The model card lives at `docs/HF_MODEL_CARD.md`. Publishing needs a **write** token for
+the `NeovisionTech` org (the current local token is read-only — 403 on repo creation):
+
+```python
+from huggingface_hub import HfApi
+api = HfApi()  # HF_TOKEN with write access to NeovisionTech
+api.create_repo("NeovisionTech/neovad", private=True, exist_ok=True)
+api.upload_file(path_or_fileobj="src/neovad/weights/mamba2.pt", path_in_repo="mamba2.pt",
+                repo_id="NeovisionTech/neovad")
+api.upload_file(path_or_fileobj="docs/HF_MODEL_CARD.md", path_in_repo="README.md",
+                repo_id="NeovisionTech/neovad")
+```
+
+`VADModel.from_pretrained` already falls back to this repo for names not bundled in the
+wheel, so post-release checkpoints reach users without a package re-release.
+
 ## 7. Roadmap
 
 1. **Fused-fp32 first** (JIT) then optional int8 — the realistic path to ≤ Silero RTF;
