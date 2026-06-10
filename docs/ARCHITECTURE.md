@@ -140,8 +140,31 @@ mix.**
 
 ## 5. Benchmark (honest, current state)
 
-`neovad bench --all-backbones --silero` on 1 CPU thread, 20 s audio, **untrained eager
-fp32** models at dim=128/depth=4:
+### Accuracy vs Silero — same audio, same labels (`neovad eval`)
+
+Both models scored on identical clips against identical per-frame speech/non-speech
+labels, on neovad's 10 ms grid. neovad uses its any-speech probability
+(`1 - P(non-speech)`), so it is judged on Silero's generic task, *not* its foreground
+advantage. ROC-AUC is the headline (threshold-free; neither model favoured by tuning).
+
+| eval set | neovad ROC-AUC | silero-v6 ROC-AUC | neovad F1 | silero F1 |
+|---|---|---|---|---|
+| **VoxConverse test** (real conversational, neither model trained on — *the credible number*) | 0.883 | **0.935** | 0.970 | 0.970 |
+| synthetic noisy multi-speaker (in-distribution for neovad) | **0.960** | 0.935 | 0.973 | 0.966 |
+
+Read this straight: on the **neutral external set, Silero still wins on ROC-AUC**
+(0.935 vs 0.883) while best-threshold frame-F1 is **tied (0.970)**. neovad only leads on
+its own in-distribution synthetic set — expected, and exactly why the neutral set is the
+one to quote. The gap is the training-data gap: neovad saw only LibriSpeech read speech +
+synthetic mixing; Silero saw huge diverse real speech. Closing it is a data problem, not
+an architecture one — add real conversational/overlap corpora (AMI, VoxCeleb2) and
+sharper labels (§7). Note also that this eval measures generic speech detection; neovad's
+actual differentiator — firing on the *foreground* speaker only (`secondary_false_fire`
+0.19) — is something Silero structurally cannot do and this metric does not capture.
+
+### Streaming latency (`neovad bench`)
+
+On 1 CPU thread, 20 s audio, **untrained eager fp32** models at dim=128/depth=4:
 
 | model | params (M) | size (MB) | RTF |
 |---|---|---|---|

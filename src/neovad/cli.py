@@ -125,6 +125,37 @@ def infer(
 
 
 @app.command()
+def eval(
+    checkpoint: Path = typer.Option(None),
+    config: Path = typer.Option(None),
+    backbone: str = typer.Option(None),
+    source: str = typer.Option("synthetic", help="synthetic | voxconverse"),
+    clips: int = typer.Option(120),
+    silero: bool = typer.Option(True, help="also score Silero on the same audio/labels"),
+    root: str = typer.Option("/disk/manual"),
+):
+    """Speech/non-speech accuracy (ROC-AUC, F1) of neovad vs Silero on identical audio."""
+    from neovad.bench.accuracy import AccuracyBenchmark
+
+    model = resolve_model(checkpoint, config, backbone).eval()
+    if source == "voxconverse":
+        data = AccuracyBenchmark.voxconverse_clips(clips)
+    else:
+        data = AccuracyBenchmark.synthetic_clips(root, clips)
+    console.print(f"[bold]{source}[/]: {len(data)} clips")
+    harness = AccuracyBenchmark()
+    silero_model = None
+    if silero:
+        try:
+            from silero_vad import load_silero_vad
+
+            silero_model = load_silero_vad()
+        except (ImportError, ModuleNotFoundError):
+            console.print("[yellow]silero-vad not installed; scoring neovad only[/]")
+    harness.report(harness.evaluate(model, data, silero=silero_model))
+
+
+@app.command()
 def export(
     out: Path = typer.Argument(..., help="output path"),
     checkpoint: Path = typer.Option(None),

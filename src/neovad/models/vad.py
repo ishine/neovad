@@ -102,6 +102,9 @@ class VADModel(nn.Module):
     def speech_probability(self, logits: Tensor) -> Tensor:
         return self.head.speech_probability(logits)
 
+    def any_speech_probability(self, logits: Tensor) -> Tensor:
+        return self.head.any_speech_probability(logits)
+
     def init_state(self, batch: int, device: torch.device, dtype: torch.dtype) -> VADState:
         return VADState(
             frontend=self.frontend.init_state(batch, device, dtype),
