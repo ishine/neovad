@@ -9,6 +9,7 @@ from neovad.config import ModelConfig, NeoVADConfig
 from neovad.frontend.mel import FrontendState, MelFrontend
 from neovad.models.backbone import Backbone
 from neovad.nn.mixer import ModuleState
+from neovad.nn.specaug import SpecAugment
 
 
 class VADState(ModuleState):
@@ -30,8 +31,9 @@ class VADModel(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.frontend = MelFrontend(cfg.frontend)
+        self.spec_augment = SpecAugment(cfg.spec_augment)
         self.input_proj = nn.Linear(cfg.frontend.n_mels, cfg.dim)
-        self.backbone = Backbone(cfg.dim, cfg.depth, cfg.mixer, cfg.mlp_mult)
+        self.backbone = Backbone(cfg.dim, cfg.depth, cfg.layer_mixers, cfg.mlp_mult)
         self.head = cfg.head.build(cfg.dim)
 
     @classmethod
@@ -96,8 +98,8 @@ class VADModel(nn.Module):
 
     def forward(self, wav: Tensor) -> Tensor:
         # wav: [B, S] -> logits [B, n_frames, n_classes]
-        h = self.input_proj(self.frontend(wav))
-        return self.head(self.backbone(h))
+        mels = self.spec_augment(self.frontend(wav))  # masking active in train mode only
+        return self.head(self.backbone(self.input_proj(mels)))
 
     def speech_probability(self, logits: Tensor) -> Tensor:
         return self.head.speech_probability(logits)

@@ -7,17 +7,22 @@ from neovad.nn.norm import RMSNorm
 
 
 class Backbone(nn.Module):
-    """A stack of identical :class:`ResidualBlock` s plus a final norm.
+    """A stack of :class:`ResidualBlock` s plus a final norm.
 
-    Every block is built from the same ``mixer_cfg`` but receives its 1-based depth so
+    ``mixer_cfgs`` is a per-layer pattern cycled over the depth: one config = a uniform
+    stack, several = a hybrid (e.g. ``[mamba2, diffattn]`` alternates SSM and attention
+    layers — the Samba/Zamba recipe). Each block receives its 1-based depth so
     schedule-dependent mixers (Differential Attention) initialise per layer. The
-    backbone's streaming state is just the ordered list of its blocks' states.
+    backbone's streaming state is the ordered list of its blocks' states.
     """
 
-    def __init__(self, dim: int, depth: int, mixer_cfg: MixerConfig, mlp_mult: float):
+    def __init__(self, dim: int, depth: int, mixer_cfgs: list[MixerConfig], mlp_mult: float):
         super().__init__()
         self.blocks = nn.ModuleList(
-            [ResidualBlock(dim, mixer_cfg, depth=i + 1, mlp_mult=mlp_mult) for i in range(depth)]
+            [
+                ResidualBlock(dim, mixer_cfgs[i % len(mixer_cfgs)], depth=i + 1, mlp_mult=mlp_mult)
+                for i in range(depth)
+            ]
         )
         self.norm = RMSNorm(dim)
 

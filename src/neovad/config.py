@@ -6,14 +6,26 @@ from pydantic import BaseModel, Field
 
 from neovad.frontend.mel import FrontendConfig
 from neovad.nn.attention import DiffAttnConfig, GQAConfig, MLAConfig
+from neovad.nn.convmixer import ConvMixerConfig
+from neovad.nn.deltanet import GatedDeltaNetConfig
 from neovad.nn.gru import GRUConfig
 from neovad.nn.head import AttractorHeadConfig, LinearHeadConfig
+from neovad.nn.linear_rnn import MinGRUConfig, RGLRUConfig
 from neovad.nn.mamba import Mamba2Config
+from neovad.nn.specaug import SpecAugmentConfig
 
 # The single pluggable axis: a typed discriminated union over every registered mixer.
 # Selecting a backbone is setting `mixer.kind`; nothing else in the model changes.
 MixerCfg = Annotated[
-    GRUConfig | GQAConfig | MLAConfig | DiffAttnConfig | Mamba2Config,
+    GRUConfig
+    | GQAConfig
+    | MLAConfig
+    | DiffAttnConfig
+    | Mamba2Config
+    | RGLRUConfig
+    | MinGRUConfig
+    | ConvMixerConfig
+    | GatedDeltaNetConfig,
     Field(discriminator="kind"),
 ]
 HeadCfg = Annotated[LinearHeadConfig | AttractorHeadConfig, Field(discriminator="kind")]
@@ -25,7 +37,15 @@ class ModelConfig(BaseModel):
     mlp_mult: float = 3.0
     frontend: FrontendConfig = FrontendConfig()
     mixer: MixerCfg = Mamba2Config()
+    # Optional per-layer pattern cycled over depth (hybrid stacks, Samba/Zamba style);
+    # when set it overrides `mixer`, e.g. [{kind: mamba2}, {kind: diffattn}].
+    mixers: list[MixerCfg] | None = None
     head: HeadCfg = AttractorHeadConfig()
+    spec_augment: SpecAugmentConfig = SpecAugmentConfig()
+
+    @property
+    def layer_mixers(self) -> list[MixerCfg]:
+        return self.mixers or [self.mixer]
 
 
 class DataConfig(BaseModel):

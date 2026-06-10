@@ -3,17 +3,25 @@ import torch
 
 from neovad.frontend.mel import FrontendConfig, MelFrontend
 from neovad.nn.attention import DiffAttnConfig, GQAConfig, MLAConfig
+from neovad.nn.convmixer import ConvMixerConfig
+from neovad.nn.deltanet import GatedDeltaNetConfig
 from neovad.nn.gru import GRUConfig
+from neovad.nn.linear_rnn import MinGRUConfig, RGLRUConfig
 from neovad.nn.mamba import Mamba2Config
 
 # Small windows on purpose, so the streaming KV ring-buffer / state-truncation path is
-# exercised (window < sequence length), not just the trivial full-context case.
+# exercised (window < sequence length), not just the trivial full-context case. Small
+# scan chunks likewise force the chunk-boundary carry in the linear-RNN mixers.
 MIXER_CFGS = {
     "gru": GRUConfig(hidden=32),
     "gqa": GQAConfig(n_heads=4, n_kv_heads=2, window=8),
     "mla": MLAConfig(n_heads=4, window=8),
     "diffattn": DiffAttnConfig(n_heads=2, window=8),
     "mamba2": Mamba2Config(headdim=16, d_state=16),
+    "rglru": RGLRUConfig(chunk=8),
+    "mingru": MinGRUConfig(chunk=8),
+    "convmixer": ConvMixerConfig(kernel=7),
+    "gdn": GatedDeltaNetConfig(n_heads=4),
 }
 
 
@@ -47,6 +55,30 @@ def test_model_forward_step_equivalence(backbone, make_model, chunk_hops):
         )
     n = min(full.shape[1], stepped.shape[1])
     assert torch.allclose(full[:, :n], stepped[:, :n], atol=1e-3)
+
+
+def test_hybrid_stack_forward_step_equivalence():
+    # Per-layer mixer pattern (SSM + attention alternating) must satisfy the same
+    # contract as uniform stacks.
+    from neovad.config import ModelConfig
+    from neovad.models.vad import VADModel
+
+    torch.manual_seed(0)
+    cfg = ModelConfig(
+        dim=32, depth=4, mixers=[{"kind": "mamba2", "headdim": 16}, {"kind": "diffattn"}]
+    )
+    model = VADModel(cfg).eval()
+    kinds = [block.mixer.kind for block in model.backbone.blocks]
+    assert kinds == ["mamba2", "diffattn", "mamba2", "diffattn"]
+    wav = torch.randn(1, 8000)
+    hop = cfg.frontend.hop_length
+    with torch.no_grad():
+        full = model(wav)
+        state = model.init_state(1, wav.device, torch.float32)
+        stepped = torch.cat(
+            [model.step(wav[:, i : i + hop], state) for i in range(0, 8000, hop)], dim=1
+        )
+    assert torch.allclose(full, stepped[:, : full.shape[1]], atol=1e-3)
 
 
 def test_mamba2_forward_finite_long_sequence():

@@ -29,4 +29,14 @@ def test_registry_unknown_kind():
 
 
 def test_registry_lists_all_backbones():
-    assert set(StreamingMixer.names()) == {"gru", "gqa", "mla", "diffattn", "mamba2"}
+    assert set(StreamingMixer.names()) == {
+        "gru",
+        "gqa",
+        "mla",
+        "diffattn",
+        "mamba2",
+        "rglru",
+        "mingru",
+        "convmixer",
+        "gdn",
+    }
