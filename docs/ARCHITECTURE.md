@@ -8,11 +8,12 @@ foreground speaker alone.
 
 ## 1. The problem
 
-A real-time telephony agent runs STT behind a denoiser. The denoiser lets
-non-stationary noise and *background voices* through as false negatives, and
-commercial speaker-isolation models are no longer enough. The team's own
-conclusion: a *stateful* model that locks onto the current dominant speaker and rejects
-everything else — "a Mamba that identifies the current speaker via its hidden state".
+A real-time telephony agent runs STT behind a denoiser. Denoisers and commercial
+speaker-isolation models let non-stationary noise and *background voices* through as
+false negatives — they are biased to preserve anything voice-like, even in the
+background. The conclusion: a *stateful* model that locks onto the current dominant
+speaker and rejects everything else — a recurrent/SSM state that implicitly identifies
+the current speaker.
 
 So neovad is not a plain speech/non-speech VAD. It emits a per-frame decision over
 `{non-speech, primary, secondary}` and gates on `primary`. Background noise
@@ -236,9 +237,9 @@ wheel, so post-release checkpoints reach users without a package re-release.
 * Pure-torch Mamba-2 CPU `step` may be the latency bottleneck → `gru` is the proven
   fallback; profile early.
 * Foreground labelling is the riskiest part: synthetic "dominant speaker" may not
-  transfer to a faint/distant caller (the known hard case) → keep a
-  plain-VAD ablation (drop the secondary head) as a safety net; eval on faint/far primary.
-* Telephony domain gap: validate on codec-degraded audio and real flagged calls, not
+  transfer to a faint/distant caller (the known hard case) → keep a plain-VAD ablation
+  (drop the secondary head) as a safety net; eval on faint/far primary.
+* Telephony domain gap: validate on codec-degraded audio and real hard calls, not
   clean wideband.
 * RMSNorm CPU kernels can regress vs LayerNorm on some builds → benchmark on the target
   runtime.

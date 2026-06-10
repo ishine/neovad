@@ -41,26 +41,21 @@ streaming-state machinery. Add a backbone = subclass `StreamingMixer`, declare a
 
 ## Install
 
-The repo is **private**, so a plain HTTPS install fails with `git clone … exit code 128`
-unless your GitHub credentials are configured. Two working paths:
-
 ```bash
-# 1) SSH (recommended — works if your SSH key is registered with the org)
-pip install "git+ssh://git@github.com/NeovisionSAS/neovad.git"
-
-# 2) HTTPS with a personal access token
-pip install "git+https://${GITHUB_TOKEN}@github.com/NeovisionSAS/neovad.git"
+# inference only (torch + numpy + pydantic, CPU-friendly)
+pip install "git+https://github.com/NeovisionSAS/neovad.git"
 
 # with the training engine and dataset tooling
-pip install "neovad[train] @ git+ssh://git@github.com/NeovisionSAS/neovad.git"
+pip install "neovad[train] @ git+https://github.com/NeovisionSAS/neovad.git"
 
 # with the Silero comparison + ONNX export harness
-pip install "neovad[bench] @ git+ssh://git@github.com/NeovisionSAS/neovad.git"
+pip install "neovad[bench] @ git+https://github.com/NeovisionSAS/neovad.git"
 ```
 
 The pretrained `mamba2` weights ship **inside the wheel** (`neovad/weights/mamba2.pt`),
-so `from_pretrained` works offline right after install. Newer checkpoints are resolved
-from the HuggingFace Hub (`NeovisionTech/neovad`) as a fallback.
+so `from_pretrained` works offline right after install — no download step. Checkpoints
+published after your installed version are resolved from the HuggingFace Hub
+(`NeovisionTech/neovad`) as a fallback.
 
 ## Use as a library
 

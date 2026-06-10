@@ -36,9 +36,9 @@ class MelFrontend(nn.Module):
 
     PCEN (per-channel energy normalization) replaces the usual log compression with a
     learnable AGC whose smoother is a first-order IIR. That AGC suppresses stationary
-    background and normalizes loudness — directly the "leaked background that the
-    denoiser misses" complaint from production experience — for a few multiplies per
-    band, and it streams losslessly because its only state is the per-band smoother.
+    background and normalizes loudness — exactly the background leakage an upstream
+    denoiser misses — for a few multiplies per band, and it streams losslessly because
+    its only state is the per-band smoother.
 
     ``forward`` left-pads by ``win-hop`` and frames the whole signal; ``step`` carries
     the trailing ``win-hop`` samples plus the PCEN smoother across chunks, so a single
