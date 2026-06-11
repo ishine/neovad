@@ -88,7 +88,11 @@ class AnalysisLogger(L.Callback):
         step = trainer.global_step
         if self.log_cfg.histograms:
             for name, p in pl.model.named_parameters():
-                w.add_histogram(f"hist/weight/{name}", p.detach().float().cpu(), step)
+                t = p.detach().float().cpu()
+                if torch.isfinite(t).all():  # a NaN'd weight must not kill the run
+                    w.add_histogram(f"hist/weight/{name}", t, step)
+                else:
+                    w.add_scalar(f"hist/nonfinite/{name}", float((~torch.isfinite(t)).sum()), step)
         if not self.log_cfg.media or self.synth is None:
             return
         if trainer.current_epoch % self.log_cfg.media_every_n_epochs != 0:

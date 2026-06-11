@@ -103,24 +103,72 @@ F1/precision/recall, `secondary_false_fire`), `lr/`, `audio/` (clean primary **a
 augmented mixture, so you can hear the augmentation), `media/` (PCEN mel + per-frame
 label-vs-prediction figures), and `hist/` (weight/grad histograms).
 
-## How it beats Silero
+## Benchmarks vs Silero (measured)
 
-Silero's weakness is not raw compute (it is already sub-millisecond) but a
-several-hundred-millisecond *decision* delay on speech→silence transitions, plus
-speaker-agnostic firing. neovad targets both: a 10 ms hop with zero look-ahead
-(`center=False`), smoothing kept *outside* the weights (tunable hysteresis), and a
-foreground-only head no speaker-agnostic VAD can match. The benchmark reports RTF,
-per-chunk wall-time, model size, **transition-decision latency**, per-condition
-ROC-AUC (AVA-Speech: clean / +music / +noise), and false-activation rate on
-interferer-only segments.
+All numbers below are produced by this repo's own harness — `neovad eval` scores both
+models on the **same audio against the same per-frame labels** (threshold-free ROC-AUC,
+validated against sklearn), and `neovad bench` measures latency on the same single CPU
+thread. Reproduce with:
+
+```bash
+neovad eval  --source voxconverse --silero     # accuracy, neutral external set
+neovad eval  --source synthetic   --silero     # accuracy, noisy multi-speaker synthesis
+neovad bench --all-backbones --silero          # streaming latency / size / RTF
+```
+
+### Accuracy — speech/non-speech, identical audio + labels
+
+neovad is scored by its *any-speech* probability, i.e. on Silero's own task, not its
+foreground advantage.
+
+| eval set | neovad (mamba2, bundled) | silero-v6 |
+|---|---|---|
+| **VoxConverse test** (76 min real conversational, neither model trained on) — ROC-AUC | 0.883 | **0.935** |
+| VoxConverse test — best-threshold frame F1 | 0.970 | 0.970 |
+| Synthetic noisy multi-speaker (neovad's training distribution) — ROC-AUC | **0.960** | 0.935 |
+
+Honest read: **on the neutral set Silero still leads on ROC-AUC** (its training corpus
+is vastly larger and more diverse); frame-F1 at the operating point is tied. An ongoing
+ablation study (SpecAugment +1.7 AUC, conversational data with clean-label handling)
+is closing the gap — see `docs/ARCHITECTURE.md` §5.
+
+### Foreground-speaker gating — the task Silero cannot do
+
+| metric (synthetic primary + interferers + noise) | neovad | silero-v6 |
+|---|---|---|
+| primary-speaker frame F1 | **0.955** | n/a (speaker-agnostic) |
+| false-fire rate on interferer-only frames | **0.19** | n/a — fires on any voice |
+
+A speaker-agnostic VAD passes every background voice to the STT; neovad's whole point
+is that it does not.
+
+### Latency & size — 1 CPU thread
+
+| model | size | streaming RTF | offline RTF (2 s windows) |
+|---|---|---|---|
+| neovad mamba2 (torch fp32, 30 ms chunks) | 3.6 MB | 0.089 | 0.008 |
+| neovad mamba2 (**ONNX fp32**) | 2.7 MB | — | **0.005** |
+| neovad mamba2 (torch int8) | **0.96 MB** | ≈ fp32 (size win, not speed) | — |
+| neovad gru (torch fp32, 30 ms chunks) | 3.6 MB | **0.046** | — |
+| silero-v6 (fused JIT, 32 ms chunks) | 2.2 MB | **0.009** | 0.009 |
+
+Honest read: in **offline/batch** mode neovad's ONNX export is **~2× faster than
+Silero** (RTF 0.005 vs 0.009) and the int8 export is **half Silero's size**. In
+**streaming** mode Silero's fused graph still wins per-chunk (0.009 vs 0.046–0.089);
+neovad is comfortably real-time (≥11×) and emits decisions at 10 ms granularity vs
+Silero's 32 ms. The remaining streaming gap is per-call overhead on a tiny eager
+graph — the documented fix is exporting the `step` graph itself.
 
 ## Datasets
 
-Training data is synthesized on the fly (no pre-rendered set): one primary speaker
-(LibriSpeech / Common Voice) + 1–3 interferers + MUSAN/DNS5 noise + room impulse
-response + telephony codec degradation, with labels derived from the **clean** primary
-reference. `neovad download` fetches the sources into `/disk/manual`. WHAM! is
-CC BY-NC and is eval-only, never in the shipped mix.
+Training data is synthesized on the fly (no pre-rendered set): one **clean primary**
+speaker (LibriSpeech, Common Voice fr/en) + 1–3 interfering voices (AMI real meeting
+speech, MUSAN babble — crosstalk-y corpora live in the *interferer* pool only, so they
+never pollute the primary labels) + MUSAN noise/music + VocalSound laughs/coughs as
+hard non-speech + room impulse response + telephony codec degradation. Labels derive
+from the clean primary reference. `neovad download` fetches everything into
+`/disk/manual` (direct OpenSLR archives + HuggingFace sources materialized to 16 kHz
+FLAC). All sources are commercial-safe (CC BY / CC0 / CC BY-SA).
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and the research
 behind every choice.

@@ -59,6 +59,11 @@ class DataConfig(BaseModel):
     # voices are drawn from speech_sources. Heavier real-noise/overlap sets
     # (DNS5, AMI, FSD50K) are optional opt-ins documented in docs/ARCHITECTURE.md.
     speech_sources: list[str] = ["librispeech"]
+    # Pool for interfering voices; None -> speech_sources. Keep crosstalk-y corpora
+    # (AMI meetings) HERE and out of speech_sources: a "primary" clip containing
+    # background voices poisons the foreground labels, but an interferer containing
+    # crosstalk is just more realistic interference.
+    interferer_sources: list[str] | None = None
     noise_sources: list[str] = ["musan"]
     min_interferers: int = 0
     max_interferers: int = 3

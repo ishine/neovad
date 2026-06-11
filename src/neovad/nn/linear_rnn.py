@@ -113,9 +113,11 @@ class MinGRUMixer(StreamingMixer):
         self.out_proj = nn.Linear(self.d_inner, dim, bias=False)
 
     def gates(self, x: Tensor) -> tuple[Tensor, Tensor]:
-        z = torch.sigmoid(self.w_z(x))
-        log_decay = torch.log1p(-z.clamp(max=1 - 1e-6))  # log(1 - z)
-        return log_decay, z * self.w_h(x)
+        s = self.w_z(x)
+        # log(1 - sigmoid(s)) == -softplus(s): exact and finite in low precision,
+        # where an epsilon clamp on sigmoid rounds away in bf16 and yields -inf.
+        log_decay = -F.softplus(s)
+        return log_decay, torch.sigmoid(s) * self.w_h(x)
 
     def forward(self, x: Tensor) -> Tensor:
         log_decay, u = self.gates(x)
