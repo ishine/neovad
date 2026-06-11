@@ -78,6 +78,29 @@ vad.reset()                        # at the call boundary
 `VADModel.from_pretrained(name)` loads weights bundled in the wheel; `from_config(yaml)`
 or `load(checkpoint)` build/restore your own.
 
+### LiveKit Agents (drop-in for `livekit-plugins-silero`)
+
+```python
+# pip install "neovad[livekit] @ git+https://github.com/NeovisionSAS/neovad.git"
+from livekit.agents import AgentSession
+from neovad.livekit import VAD
+
+session = AgentSession(
+    vad=VAD.load(),          # foreground-speaker gating by default
+    stt=..., llm=..., tts=...,
+)
+```
+
+`VAD.load(...)` mirrors the Silero plugin's options (`activation_threshold`,
+`min_speech_duration`, `min_silence_duration`, `prefix_padding_duration`,
+`max_buffered_speech`) and emits the standard `START_OF_SPEECH` /
+`INFERENCE_DONE` / `END_OF_SPEECH` events at a 30 ms cadence, so it is
+config-compatible with existing agents. The neovad-specific knob is
+`gate="primary"` (default): **turn-taking is driven by the foreground speaker
+only — a voice in the background neither opens nor holds the microphone gate.**
+Set `gate="any_speech"` for classic speaker-agnostic behaviour. Room audio at
+48 kHz is resampled internally; published event frames stay at the input rate.
+
 ### Train a model
 
 ```python

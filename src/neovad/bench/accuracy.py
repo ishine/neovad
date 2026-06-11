@@ -18,6 +18,12 @@ class AccuracyResult(BaseModel):
     f1: float  # best-threshold frame F1
     threshold: float  # threshold achieving that F1
     frames: int
+    # decision latency at that same threshold: ms from a true speech boundary to the
+    # first frame whose thresholded score reflects it (median / p90 over boundaries)
+    onset_ms: float = float("nan")
+    onset_p90_ms: float = float("nan")
+    offset_ms: float = float("nan")
+    offset_p90_ms: float = float("nan")
 
 
 class AccuracyBenchmark:
@@ -82,28 +88,71 @@ class AccuracyBenchmark:
         idx = np.minimum((np.arange(n_frames) * self.hop) // win, len(probs) - 1)
         return probs[idx]
 
+    @staticmethod
+    def transition_delays(
+        scores: np.ndarray, labels: np.ndarray, threshold: float, max_lag: int = 100
+    ) -> tuple[list[int], list[int]]:
+        """Per-boundary detection lag, in frames, for one clip.
+
+        Onset: first frame at/after a true speech start where the thresholded score is
+        ON. Offset: first frame at/after a true speech end where it is OFF. Boundaries
+        not reflected within ``max_lag`` frames count as missed (excluded; rate is
+        visible through F1). The metric Silero's published AUCs hide — turn-taking
+        latency in a live agent is exactly this lag.
+        """
+        lab = labels.astype(bool)
+        pred = scores >= threshold
+        prev = np.roll(lab, 1)
+        prev[0] = lab[0]
+        onsets, offsets = [], []
+        for idx in np.flatnonzero(lab & ~prev):
+            window = pred[idx : idx + max_lag]
+            hits = np.flatnonzero(window)
+            if hits.size:
+                onsets.append(int(hits[0]))
+        for idx in np.flatnonzero(~lab & prev):
+            window = pred[idx : idx + max_lag]
+            misses = np.flatnonzero(~window)
+            if misses.size:
+                offsets.append(int(misses[0]))
+        return onsets, offsets
+
     def evaluate(self, model: VADModel, clips: list, silero=None) -> list[AccuracyResult]:
         model = model.eval()
-        neo_s, neo_y, sil_s, sil_y = [], [], [], []
+        per_model: dict[str, list[tuple[np.ndarray, np.ndarray]]] = {"neovad": []}
+        if silero is not None:
+            per_model["silero-v6"] = []
         for wav, labels in clips:
             y = labels.cpu().numpy()
             ns = self.neovad_scores(model, wav)
             n = min(len(ns), len(y))
-            neo_s.append(ns[:n])
-            neo_y.append(y[:n])
+            per_model["neovad"].append((ns[:n], y[:n]))
             if silero is not None:
-                ss = self.silero_scores(silero, wav, n)
-                sil_s.append(ss[:n])
-                sil_y.append(y[:n])
-        out = [self._score("neovad", np.concatenate(neo_s), np.concatenate(neo_y))]
-        if silero is not None:
-            out.append(self._score("silero-v6", np.concatenate(sil_s), np.concatenate(sil_y)))
-        return out
+                per_model["silero-v6"].append((self.silero_scores(silero, wav, n), y[:n]))
+        return [self._score(name, pairs) for name, pairs in per_model.items()]
 
-    def _score(self, name: str, scores: np.ndarray, labels: np.ndarray) -> AccuracyResult:
+    def _score(self, name: str, pairs: list[tuple[np.ndarray, np.ndarray]]) -> AccuracyResult:
+        scores = np.concatenate([s for s, _ in pairs])
+        labels = np.concatenate([y for _, y in pairs])
         f1, t = self.best_f1(scores, labels)
+        onsets, offsets = [], []
+        for s, y in pairs:  # boundaries never span clips
+            on, off = self.transition_delays(s, y, t)
+            onsets += on
+            offsets += off
+        hop_ms = self.hop / self.sr * 1000
+        onset = np.array(onsets, dtype=float) * hop_ms
+        offset = np.array(offsets, dtype=float) * hop_ms
         return AccuracyResult(
-            name=name, roc_auc=self.roc_auc(scores, labels), f1=f1, threshold=t, frames=len(labels)
+            name=name,
+            roc_auc=self.roc_auc(scores, labels),
+            f1=f1,
+            threshold=t,
+            frames=len(labels),
+            onset_ms=float(np.median(onset)) if onset.size else float("nan"),
+            onset_p90_ms=float(np.percentile(onset, 90)) if onset.size else float("nan"),
+            offset_ms=float(np.median(offset)) if offset.size else float("nan"),
+            offset_p90_ms=float(np.percentile(offset, 90)) if offset.size else float("nan"),
         )
 
     @staticmethod
@@ -152,10 +201,25 @@ class AccuracyBenchmark:
         from rich.table import Table
 
         table = Table(title="speech/non-speech accuracy (same audio, same labels)")
-        for col in ["model", "ROC-AUC", "frame-F1", "@threshold", "frames"]:
+        cols = [
+            "model",
+            "ROC-AUC",
+            "frame-F1",
+            "@thr",
+            "onset ms (p90)",
+            "offset ms (p90)",
+            "frames",
+        ]
+        for col in cols:
             table.add_column(col, justify="right")
         for r in results:
             table.add_row(
-                r.name, f"{r.roc_auc:.4f}", f"{r.f1:.4f}", f"{r.threshold:.2f}", str(r.frames)
+                r.name,
+                f"{r.roc_auc:.4f}",
+                f"{r.f1:.4f}",
+                f"{r.threshold:.2f}",
+                f"{r.onset_ms:.0f} ({r.onset_p90_ms:.0f})",
+                f"{r.offset_ms:.0f} ({r.offset_p90_ms:.0f})",
+                str(r.frames),
             )
         Console().print(table)

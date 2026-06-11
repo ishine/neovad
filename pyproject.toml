@@ -39,6 +39,10 @@ bench = [
     "onnx>=1.16",
     "onnxscript>=0.1",
 ]
+# LiveKit Agents integration (AgentSession(vad=neovad.livekit.VAD.load()))
+livekit = [
+    "livekit-agents>=1.0,<2",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
