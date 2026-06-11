@@ -3,10 +3,12 @@ from pathlib import Path
 
 import lightning as L
 import torch
+from lightning.pytorch.utilities import CombinedLoader
 from torch import Tensor
 
 from neovad.config import NeoVADConfig
 from neovad.data.dataset import SynthVADDataset
+from neovad.data.real import RealVADDataset
 from neovad.models.vad import VADModel
 from neovad.nn.head import SpeechClass
 from neovad.train.loss import FrameVADLoss
@@ -34,10 +36,22 @@ class NeoVADLit(L.LightningModule):
         return logits[:, :t], labels[:, :t]
 
     def training_step(self, batch, _):
-        wav, labels = batch
+        # Plain synthetic batch, or {"synth": ..., "real": ...} from the CombinedLoader
+        # when real human-labelled audio is enabled (DataConfig.real_windows > 0).
+        synth = batch["synth"] if isinstance(batch, dict) else batch
+        wav, labels = synth
         logits, labels = self.align(self.model(wav), labels)
         loss = self.loss(logits, labels)
         self.log("train/loss", loss, prog_bar=True)
+        if isinstance(batch, dict):
+            real_wav, real_speech = batch["real"]
+            real_logits, real_speech = self.align(self.model(real_wav), real_speech)
+            speech_logit = self.model.head.any_speech_logit(real_logits)
+            real_loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                speech_logit, real_speech
+            )
+            self.log("train/real_loss", real_loss, prog_bar=True)
+            loss = loss + self.cfg.train.loss.real_weight * real_loss
         self.log("lr/value", self.optimizers().param_groups[0]["lr"])
         return loss
 
@@ -112,7 +126,15 @@ class NeoVADLit(L.LightningModule):
             logger=L.pytorch.loggers.TensorBoardLogger(save_dir=str(out), name="tb"),
             callbacks=callbacks,
         )
-        trainer.fit(lit, SynthVADDataset.loader(cfg), SynthVADDataset.loader(cfg))
+        train_loader = SynthVADDataset.loader(cfg)
+        if cfg.data.real_windows > 0:
+            RealVADDataset.build_cache(cfg.data.real_cache, cfg.data.real_windows)
+            real = RealVADDataset(cfg.data.real_cache, cfg.data, cfg.model.frontend)
+            train_loader = CombinedLoader(
+                {"synth": train_loader, "real": real.loader(cfg.data.batch_size, 2)},
+                mode="max_size_cycle",
+            )
+        trainer.fit(lit, train_loader, SynthVADDataset.loader(cfg))
         best = callbacks[0].best_model_path
         if best:  # restore the best-val epoch before exporting the portable checkpoint
             state = torch.load(best, map_location="cpu", weights_only=False)["state_dict"]

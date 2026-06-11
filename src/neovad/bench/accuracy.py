@@ -171,11 +171,14 @@ class AccuracyBenchmark:
         return clips
 
     @staticmethod
-    def voxconverse_clips(n: int, window_s: int = 30, sr: int = 16000, hop: int = 160) -> list:
-        # Neutral external benchmark: real conversational speech neither model trained on.
+    def voxconverse_clips(
+        n: int, window_s: int = 30, sr: int = 16000, hop: int = 160, split: str = "test"
+    ) -> list:
+        # split="test": the neutral eval benchmark — NEVER trained on.
+        # split="dev": disjoint recordings, usable as real supervised training data.
         from datasets import Audio, load_dataset  # optional (the `train` extra)
 
-        ds = load_dataset("diarizers-community/voxconverse", split="test", streaming=True)
+        ds = load_dataset("diarizers-community/voxconverse", split=split, streaming=True)
         ds = ds.cast_column("audio", Audio(decode=False))
         clips = []
         for ex in ds:

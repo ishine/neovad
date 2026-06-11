@@ -75,6 +75,10 @@ class DataConfig(BaseModel):
     p_telephony: float = 0.5  # 8 kHz mu-law round-trip
     label_db_threshold: float = -40.0  # primary-reference energy gate for frame labels
     label_smooth_frames: int = 5  # median smoothing of the derived labels
+    # Real human-labelled audio (VoxConverse dev) mixed into training as an any-speech
+    # objective; 0 disables. Closes the synthetic->real domain gap the neutral eval shows.
+    real_windows: int = 0
+    real_cache: str = "/disk/manual/voxconverse_dev.pt"
 
 
 class LossConfig(BaseModel):
@@ -82,6 +86,7 @@ class LossConfig(BaseModel):
     # firing on anyone but the locked foreground speaker (Personal-VAD spirit).
     class_weights: list[float] = [1.0, 2.0, 1.0]  # [non-speech, primary, secondary]
     label_smoothing: float = 0.0
+    real_weight: float = 0.5  # weight of the real-audio any-speech BCE term
 
 
 class LogConfig(BaseModel):

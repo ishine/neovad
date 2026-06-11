@@ -43,6 +43,15 @@ class VADHead(Registry, nn.Module, root=True):
             return logits.squeeze(-1).sigmoid()
         return 1.0 - logits.softmax(-1)[..., int(SpeechClass.NON_SPEECH)]
 
+    def any_speech_logit(self, logits: Tensor) -> Tensor:
+        # log(P(speech)/P(non-speech)) — sigmoid of this equals any_speech_probability.
+        # Autocast-safe target for BCEWithLogits (prob-space BCE is banned under bf16).
+        if self.n_classes == 1:
+            return logits.squeeze(-1)
+        ns = int(SpeechClass.NON_SPEECH)
+        speech = torch.cat([logits[..., :ns], logits[..., ns + 1 :]], dim=-1)
+        return torch.logsumexp(speech, dim=-1) - logits[..., ns]
+
 
 class HeadConfig(BaseModel):
     kind: str

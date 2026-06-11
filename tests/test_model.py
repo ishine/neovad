@@ -33,6 +33,17 @@ def test_from_pretrained_missing_is_clear():
         VADModel.from_pretrained("no-such-model")
 
 
+def test_any_speech_logit_matches_probability(make_model):
+    # sigmoid(any_speech_logit) must equal any_speech_probability exactly — the logit
+    # form exists for autocast-safe BCE on real-audio labels.
+    model = make_model("mamba2").eval()
+    with torch.no_grad():
+        logits = model(torch.randn(2, 4000))
+    prob = model.any_speech_probability(logits)
+    via_logit = model.head.any_speech_logit(logits).sigmoid()
+    assert torch.allclose(prob, via_logit, atol=1e-5)
+
+
 def test_speech_probability_range(make_model):
     model = make_model("mamba2").eval()
     with torch.no_grad():
